@@ -8,7 +8,7 @@
  * This code is a C Sharp implementation for accessing the web API of Visualink
  * Pastec. A Content Based Image Retreival system.
  * 
- * Pastec wensite:      http://pastec.io/
+ * Pastec website:      http://pastec.io/
  * Pastec source code:  https://github.com/magwyz/pastec
  */
 
@@ -24,6 +24,7 @@ namespace PastecLib
     using System.Net.Http;
     using System.Net.Http.Headers;
     using System.Text;
+    using System.Threading;
     using System.Threading.Tasks;
 
     [Serializable]
@@ -54,7 +55,7 @@ namespace PastecLib
     }
 
     [Serializable]
-    public class SearchResult
+    public class PastecResult
     {
         public long ImageId;
         public string Tag;
@@ -68,7 +69,16 @@ namespace PastecLib
 
         public string Host => host;
 
+        public string WordsIndex { get; set; } = string.Empty;
+
+        public string TagsIndex { get; set; } = string.Empty;
+
         public PastecAPI() { }
+
+        public PastecAPI(string origin)
+        {
+            this.host = origin;
+        }
 
         public PastecAPI(string host, int port, bool useSsl = false)
         {
@@ -85,11 +95,11 @@ namespace PastecLib
         /// <param name="path">The API path</param>
         /// <param name="json">The JSON object with the attributes for the API call</param>
         /// <returns>Returns the JSON data object that is returnd by the server</returns>
-        private async Task<dynamic> Request(HttpMethod method, string path, dynamic json)
+        private async Task<dynamic> Request(HttpMethod method, string path, dynamic json, int timeout = 30)
         {
             using (HttpContent data = new StringContent(json.ToString(), Encoding.UTF8, "application/json"))
             {
-                return await Request(method, path, data);
+                return await Request(method, path, data, timeout);
             }
         }
 
@@ -101,18 +111,28 @@ namespace PastecLib
         /// <param name="path">The API path</param>
         /// <param name="data">The request content for the API call</param>
         /// <returns>Returns the JSON data object that is returnd by the server</returns>
-        private async Task<dynamic> Request(HttpMethod method, string path, HttpContent data = null)
+        private async Task<dynamic> Request(HttpMethod method, string path, HttpContent data = null, int timeout = 30)
         {
-            using (HttpClient client = new HttpClient())
+            using (HttpClient client = new HttpClient() 
+            { 
+                Timeout = timeout <= 0 ? Timeout.InfiniteTimeSpan : TimeSpan.FromSeconds(timeout)
+            })
             using (HttpRequestMessage request = new HttpRequestMessage(method, $"{Host}{path}")
             {
                 Content = data
             })
-            using (HttpResponseMessage res = await client.SendAsync(request))
-            using (HttpContent content = res.Content)
-            {
-                return JsonConvert.DeserializeObject<dynamic>(await content.ReadAsStringAsync());
-            }
+                try
+                {
+                    using (HttpResponseMessage res = await client.SendAsync(request))
+                    using (HttpContent content = res.Content)
+                    {
+                        return JsonConvert.DeserializeObject<dynamic>(await content.ReadAsStringAsync());
+                    }
+                }
+                catch(Exception e)
+                {
+                    throw new Exception($"Exception on request: {Host}{path}\r\n{e.Message}");
+                }
         }
 
         /// <summary>
@@ -146,9 +166,16 @@ namespace PastecLib
                 type = "PING"
             });
 
-            var result = await Request(HttpMethod.Post, "/", json);
+            try
+            {
+                var result = await Request(HttpMethod.Post, "/", json, 5);
 
-            return TestResult("PONG", result);
+                return TestResult("PONG", result);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>
@@ -190,7 +217,9 @@ namespace PastecLib
         }
 
         /// <summary>
-        /// 
+        /// Index the image available via the given url. The image will be 
+        /// downloaded by the Pastec engine and will then indexed. The image 
+        /// will not be stored anywhere.
         /// </summary>
         /// <param name="imageId">Identifier for the image</param>
         /// <param name="imageUrl">Url to the image resource</param>
@@ -260,11 +289,17 @@ namespace PastecLib
         }
 
         /// <summary>
+        /// Loads the CBIR index from the default path stored in WordsIndex.
+        /// </summary>
+        /// <returns>Returns True when the index is succesfully loaded</returns>
+        public async Task<bool> LoadIndex() => await LoadIndex(WordsIndex);
+
+        /// <summary>
         /// Loads the CBIR index from the given local server path.
         /// </summary>
         /// <param name="path">The path of the index file on the server</param>
         /// <returns>Returns True when the index is succesfully loaded</returns>
-        public async Task<bool> LoadIndex(string path = "")
+        public async Task<bool> LoadIndex(string path)
         {
             var json = JObject.FromObject(new
             {
@@ -272,17 +307,23 @@ namespace PastecLib
                 index_path = path
             });
 
-            var result = await Request(HttpMethod.Post, "/index/io", json);
+            var result = await Request(HttpMethod.Post, "/index/io", json, 0);
 
             return TestResult("INDEX_LOADED", result);
         }
+
+        /// <summary>
+        /// Saves the CBIR index to the default path stored in WordsIndex.
+        /// </summary>
+        /// <returns>Returns True when the index is succesfully saved</returns>
+        public async Task<bool> WriteIndex() => await WriteIndex(WordsIndex);
 
         /// <summary>
         /// Saves the CBIR index to the given local server path.
         /// </summary>
         /// <param name="path">The path of the index file on the server</param>
         /// <returns>Returns True when the index is succesfully saved</returns>
-        public async Task<bool> WriteIndex(string path = "")
+        public async Task<bool> WriteIndex(string path)
         {
             var json = JObject.FromObject(new
             {
@@ -290,17 +331,23 @@ namespace PastecLib
                 index_path = path
             });
 
-            var result = await Request(HttpMethod.Post, "/index/io", json);
+            var result = await Request(HttpMethod.Post, "/index/io", json, 0);
 
             return TestResult("INDEX_WRITTEN", result);
         }
+
+        /// <summary>
+        /// Loads the tag index from the default path stored in TagsIndex.
+        /// </summary>
+        /// <returns>Returns True when the index is succesfully loaded</returns>
+        public async Task<bool> LoadIndexTags() => await LoadIndexTags(TagsIndex);
 
         /// <summary>
         /// Loads the tag index from the given local server path.
         /// </summary>
         /// <param name="path">The path of the index file on the server</param>
         /// <returns>Returns True when the index is succesfully loaded</returns>
-        public async Task<bool> LoadIndexTags(string path = "")
+        public async Task<bool> LoadIndexTags(string path)
         {
             var json = JObject.FromObject(new
             {
@@ -308,17 +355,23 @@ namespace PastecLib
                 index_tags_path = path
             });
 
-            var result = await Request(HttpMethod.Post, "/index/io", json);
+            var result = await Request(HttpMethod.Post, "/index/io", json, 0);
 
             return TestResult("INDEX_TAGS_LOADED", result);
         }
+
+        /// <summary>
+        /// Saves the tag index to the default path stored in TagsIndex.
+        /// </summary>
+        /// <returns>Returns True when the index is succesfully saved</returns>
+        public async Task<bool> WriteIndexTags() => await WriteIndexTags(TagsIndex);
 
         /// <summary>
         /// Saves the tag index to the given local server path.
         /// </summary>
         /// <param name="path">The path of the index file on the server</param>
         /// <returns>Returns True when the index is succesfully saved</returns>
-        public async Task<bool> WriteIndexTags(string path = "")
+        public async Task<bool> WriteIndexTags(string path)
         {
             var json = JObject.FromObject(new
             {
@@ -326,7 +379,7 @@ namespace PastecLib
                 index_tags_path = path
             });
 
-            var result = await Request(HttpMethod.Post, "/index/io", json);
+            var result = await Request(HttpMethod.Post, "/index/io", json, 0);
 
             return TestResult("INDEX_TAGS_WRITTEN", result);
         }
@@ -371,7 +424,7 @@ namespace PastecLib
         /// </summary>
         /// <param name="filePath">Local file</param>
         /// <returns>The images that matches the query image.</returns>
-        public async Task<SearchResult[]> ImageQueryFile(string filePath)
+        public async Task<PastecResult[]> ImageQueryFile(string filePath)
         {
             return await ImageQueryData(await File.ReadAllBytesAsync(filePath));
         }
@@ -381,7 +434,7 @@ namespace PastecLib
         /// </summary>
         /// <param name="filePath">Local file</param>
         /// <returns>The images that matches the query image.</returns>
-        public async Task<SearchResult[]> ImageQueryData(byte[] imageData)
+        public async Task<PastecResult[]> ImageQueryData(byte[] imageData)
         {
             using (var data = new ByteArrayContent(imageData))
             {
@@ -391,8 +444,6 @@ namespace PastecLib
 
                 if (TestResult("SEARCH_RESULTS", result))
                 {
-                    Console.WriteLine(result);
-
                     long[] imagesIds = result["image_ids"] is JArray _image_ids 
                         ? _image_ids.Select(x => (long)x).ToArray<long>() 
                         : new long[0];
@@ -411,11 +462,11 @@ namespace PastecLib
                             )).ToArray<Rectangle>() 
                         : new Rectangle[0];
 
-                    List<SearchResult> sResults = new List<SearchResult>();
+                    List<PastecResult> sResults = new List<PastecResult>();
 
                     for (int i = 0; i < imagesIds.Count(); i++)
                     {
-                        sResults.Add(new SearchResult()
+                        sResults.Add(new PastecResult()
                         {
                             ImageId = imagesIds[i],
                             Tag = i < tags.Count() ? tags[i] : string.Empty,
