@@ -65,9 +65,7 @@ namespace PastecLib
 
     public class PastecAPI
     {
-        private readonly string host = "http://localhost:4212";
-
-        public string Host => host;
+        public string Host { get; } = "http://localhost:4212";
 
         public string WordsIndex { get; set; } = string.Empty;
 
@@ -77,12 +75,12 @@ namespace PastecLib
 
         public PastecAPI(string origin)
         {
-            this.host = origin;
+            Host = origin;
         }
 
         public PastecAPI(string host, int port, bool useSsl = false)
         {
-            this.host = useSsl
+            Host = useSsl
                 ? $"https://{host}:{port}"
                 : $"http://{host}:{port}";
         }
